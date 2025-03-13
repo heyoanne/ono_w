@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Color Recognition</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Tela de introdução -->
+    <div id="intro-screen">
+        <div>
+            <h1>Bem-vindo! Digite seu nome:</h1>
+            <input type="text" id="userName" placeholder="Digite seu nome">
+            <button onclick="startApp()">Iniciar</button>
+        </div>
+    </div>
+
+    <!-- Tela da câmera -->
+    <div id="camera-screen">
+        <h2>Color Recognition</h2>
+        <video id="video" width="640" height="480" autoplay></video>
+        <canvas id="canvas" width="640" height="480"></canvas>
+    </div>
+
+    <script>
+        const video = document.getElementById("video");
+        const canvas = document.getElementById("canvas");
+        const ctx = canvas.getContext("2d");
+        let detectedAreas = [];
+        let userName = "";  // Variável para armazenar o nome do usuário
+
+        async function startApp() {
+            userName = document.getElementById("userName").value;
+            if (userName.trim() === "") {
+                alert("Por favor, insira seu nome.");
+                return;
+            }
+
+            // Esconde a tela de introdução e mostra a tela da câmera
+            document.getElementById("intro-screen").style.display = "none";
+            document.getElementById("camera-screen").style.display = "block";
+
+            startCamera();
+        }
+
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+                video.addEventListener("loadedmetadata", () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    requestAnimationFrame(drawFrame);
+                });
+            } catch (error) {
+                console.error("Error accessing the camera:", error);
+            }
+        }
+
+        function drawFrame() {
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            drawCircles();
+            requestAnimationFrame(drawFrame);
+        }
+
+        function drawCircles() {
+            detectedAreas.forEach((area, index) => {
+                ctx.fillStyle = `rgba(255, 255, 255, ${area.opacity})`;
+                ctx.beginPath();
+                ctx.arc(area.x, area.y, area.radius, 0, Math.PI * 2);
+                ctx.fill();
+
+                area.opacity -= 0.02;
+                area.radius -= 0.8;
+
+                if (area.opacity <= 0) {
+                    detectedAreas.splice(index, 1);
+                }
+            });
+        }
+
+        canvas.addEventListener("click", (event) => {
+            const rect = canvas.getBoundingClientRect();
+            let detectedArea = {
+                x: event.clientX - rect.left,
+                y: event.clientY - rect.top,
+                radius: 40,
+                opacity: 0.7
+            };
+            detectedAreas.push(detectedArea);
+            
+            console.log("Detected area:", detectedArea);
+            getDominantColor(detectedArea.x, detectedArea.y, detectedArea.radius);
+        });
+
+        async function getDominantColor(x, y, radius) {
+            const imageData = ctx.getImageData(x - radius, y - radius, radius * 2, radius * 2);
+            const data = imageData.data;
+            const colorCount = {};
+
+            for (let i = 0; i < data.length; i += 4) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+                const colorKey = `${r},${g},${b}`;
+
+                if (colorCount[colorKey]) {
+                    colorCount[colorKey]++;
+                } else {
+                    colorCount[colorKey] = 1;
+                }
+            }
+
+            let dominantColor = '';
+            let maxCount = 0;
+
+            for (let color in colorCount) {
+                if (colorCount[color] > maxCount) {
+                    maxCount = colorCount[color];
+                    dominantColor = color;
+                }
+            }
+
+            const [r, g, b] = dominantColor.split(',').map(Number);
+            const dominantColorHex = rgbToHex(r, g, b);
+            console.log(`Dominant Color: ${dominantColorHex}`);
+
+            const hsv = rgbToHsv(r, g, b);
+            const colorCategory = classifyColorByHue(hsv.hue);
+            console.log(`Color Category: ${colorCategory}`);
+
+            speakColor(colorCategory);
+        }
+
+        function rgbToHex(r, g, b) {
+            return `#${((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1).toUpperCase()}`;
+        }
+
+        function rgbToHsv(r, g, b) {
+            r /= 255;
+            g /= 255;
+            b /= 255;
+
+            const max = Math.max(r, g, b);
+            const min = Math.min(r, g, b);
+            const delta = max - min;
+            let hue = 0;
+            let saturation = 0;
+            let value = max;
+
+            if (max !== 0) {
+                saturation = delta / max;
+            }
+
+            if (delta !== 0) {
+                if (max === r) {
+                    hue = (g - b) / delta;
+                } else if (max === g) {
+                    hue = (b - r) / delta + 2;
+                } else {
+                    hue = (r - g) / delta + 4;
+                }
+                hue *= 60;
+                if (hue < 0) {
+                    hue += 360;
+                }
+            }
+
+            return { hue, saturation, value };
+        }
+
+        function classifyColorByHue(hue) {
+            if (hue >= 0 && hue <= 10 || hue >= 350 && hue < 360) {
+                return 'vermelho';
+            } else if (hue >= 10 && hue < 45) {
+                return 'laranja';
+            } else if (hue >= 45 && hue < 75) {
+                return 'amarelo';
+            } else if (hue >= 75 && hue < 165) {
+                return 'verde';
+            } else if (hue >= 165 && hue < 255) {
+                return 'azul';
+            } else if (hue >= 255 && hue < 300) {
+                return 'roxo';
+            } else {
+                return 'rosa';
+            }
+        }
+
+        function speakColor(color) {
+            const speech = new SpeechSynthesisUtterance(`${userName}, a cor selecionada parece ser ${color}`);
+            speech.lang = "pt-BR";  // Set the language to Portuguese
+            window.speechSynthesis.speak(speech);
+        }
+    </script>
+</body>
+</html>
